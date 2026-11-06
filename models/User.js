@@ -1,30 +1,21 @@
 const mongoose = require('mongoose');
 
-// كل مستخدم (عميل) بيتسجل برقم موبايله، ومرتبط بجهاز واحد بس
 const userSchema = new mongoose.Schema({
-  phone: {
-    type: String,
-    required: true,
-    unique: true, // رقم الموبايل مينفعش يتكرر لمستخدمين مختلفين
-    trim: true
-  },
-  role: {
-    type: String,
-    enum: ['worker', 'supervisor'], // عامل أو مشرف
-    required: true
-  },
-  // معرف الجهاز - بيتولد مرة واحدة في متصفح العميل ويتخزن عنده
-  // ده بيمنع إن نفس الجهاز ياخد تجربة مجانية تانية لو مسح بيانات المتصفح وسجل برقم جديد
-  deviceId: {
-    type: String,
-    required: true
-  },
-  // تاريخ بداية التجربة المجانية (بيتحدد أول مرة يسجل فيها)
-  trialStart: {
-    type: Date,
-    default: Date.now
-  },
-  // تاريخ نهاية التجربة المجانية (أسبوع من تاريخ البداية)
+  phone: { type: String, required: true, unique: true, trim: true },
+  role: { type: String, enum: ['worker', 'supervisor'], required: true },
+
+  // باسورد الدخول (4 أرقام) - بيتخزن مشفر (hash) مش نص صريح
+  pinHash: { type: String, required: true },
+
+  // حماية من محاولات تخمين الباسورد
+  failedLoginAttempts: { type: Number, default: 0 },
+  lockUntil: { type: Date, default: null },
+
+  // الجهاز اللي سجل بيه أول مرة - بيُستخدم بس لمنع تكرار التجربة المجانية
+  // (مش بيُستخدم لمنع الدخول من جهاز تاني، لأن ممكن يكون جهاز مشترك بين العمال)
+  deviceId: { type: String, required: true },
+
+  trialStart: { type: Date, default: Date.now },
   trialEnd: {
     type: Date,
     default: function () {
@@ -33,29 +24,13 @@ const userSchema = new mongoose.Schema({
       return d;
     }
   },
-  // هل الاشتراك شغال؟ وتاريخ انتهاء آخر اشتراك مدفوع (لو موجود)
-  subscriptionActive: {
-    type: Boolean,
-    default: false
-  },
-  subscriptionEnd: {
-    type: Date,
-    default: null
-  },
-  // الكود الشهري الحالي بتاع المستخدم (بيتحدد بعد الدفع)
-  currentLicenseCode: {
-    type: String,
-    default: null
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  },
-  // توكن الجلسة - بيتولد وقت تسجيل الدخول ويُستخدم للتحقق من هوية المستخدم في كل طلب
-  sessionToken: {
-    type: String,
-    default: null
-  }
+
+  subscriptionActive: { type: Boolean, default: false },
+  subscriptionEnd: { type: Date, default: null },
+  currentLicenseCode: { type: String, default: null },
+
+  createdAt: { type: Date, default: Date.now },
+  sessionToken: { type: String, default: null }
 });
 
 module.exports = mongoose.model('User', userSchema);

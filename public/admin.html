@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>لوحة الأدمن</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<style>
+  .container { max-width: 900px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.8rem; }
+  th, td { padding: 8px; text-align: center; border-bottom: 1px solid #1f2937; }
+  th { background: #1f2937; color: #38bdf8; }
+  .stat-box { display: inline-block; background: #1f2937; padding: 10px 16px; border-radius: 10px; margin: 5px; text-align: center; }
+  .stat-box b { display: block; font-size: 1.3rem; color: #34d399; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="app-header"><h1>🔐 لوحة الأدمن</h1></div>
+
+  <div id="adminLoginBox" class="section-card">
+    <div class="input-box">
+      <label>باسورد الأدمن</label>
+      <input type="password" id="adminSecretInput" class="input-field" placeholder="ادخل باسورد الأدمن">
+    </div>
+    <button class="btn-primary" onclick="loadAdminData()">دخول</button>
+    <p id="adminError" class="error-text"></p>
+  </div>
+
+  <div id="adminContent" style="display:none;">
+    <div class="section-card" style="text-align:center;">
+      <div id="statsBox"></div>
+    </div>
+
+    <div class="section-card">
+      <h2>👥 المستخدمين</h2>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>الموبايل</th><th>الدور</th><th>تاريخ التسجيل</th>
+              <th>نهاية التجربة</th><th>الاشتراك فعال؟</th><th>نهاية الاشتراك</th>
+            </tr>
+          </thead>
+          <tbody id="usersTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section-card">
+      <h2>💬 الاقتراحات</h2>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>الموبايل</th><th>النص</th><th>التاريخ</th></tr></thead>
+          <tbody id="suggestionsTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/admin.js"></script>
+</body>
+</html>

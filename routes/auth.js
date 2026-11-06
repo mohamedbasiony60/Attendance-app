@@ -5,31 +5,44 @@ const router = express.Router();
 const User = require('../models/User');
 const DeviceTrial = require('../models/DeviceTrial');
 
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCK_MINUTES = 15;
+
 function generateToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-// تسجيل مستخدم جديد
-// بياخد: رقم الموبايل، الدور (عامل/مشرف)، معرف الجهاز
+function hashPin(pin) {
+  return crypto.createHash('sha256').update(pin).digest('hex');
+}
+
+function isValidPin(pin) {
+  return typeof pin === 'string' && /^\d{4}$/.test(pin);
+}
+
+// تسجيل مستخدم جديد - رقم موبايل + باسورد 4 أرقام + الدور + معرف الجهاز
 router.post('/signup', async (req, res) => {
   try {
-    const { phone, role, deviceId } = req.body;
+    const { phone, role, deviceId, pin } = req.body;
 
-    if (!phone || !role || !deviceId) {
-      return res.status(400).json({ error: 'missing_fields', message: 'لازم تبعت رقم الموبايل والدور ومعرف الجهاز.' });
+    if (!phone || !role || !deviceId || !pin) {
+      return res.status(400).json({ error: 'missing_fields', message: 'لازم تبعت كل البيانات المطلوبة.' });
+    }
+
+    if (!isValidPin(pin)) {
+      return res.status(400).json({ error: 'invalid_pin', message: 'الباسورد لازم يكون 4 أرقام بالظبط.' });
     }
 
     if (!['worker', 'supervisor'].includes(role)) {
       return res.status(400).json({ error: 'invalid_role', message: 'الدور لازم يكون عامل أو مشرف.' });
     }
 
-    // هل رقم الموبايل ده مسجل قبل كده؟
     const existingUser = await User.findOne({ phone });
     if (existingUser) {
       return res.status(409).json({ error: 'phone_exists', message: 'رقم الموبايل ده مسجل بالفعل. سجل دخول بدل كده.' });
     }
 
-    // هل الجهاز ده استخدم التجربة المجانية قبل كده؟ (حتى لو برقم موبايل مختلف)
+    // هل الجهاز ده استخدم التجربة المجانية قبل كده؟ (منع التكرار حتى برقم موبايل مختلف)
     const deviceAlreadyUsedTrial = await DeviceTrial.findOne({ deviceId });
 
     const trialStart = new Date();
@@ -40,15 +53,14 @@ router.post('/signup', async (req, res) => {
       phone,
       role,
       deviceId,
+      pinHash: hashPin(pin),
       trialStart,
-      // لو الجهاز استخدم التجربة قبل كده، منديهوش تجربة تانية (نخلي trialEnd = trialStart يعني مفيش تجربة)
       trialEnd: deviceAlreadyUsedTrial ? trialStart : trialEnd,
       sessionToken: generateToken()
     });
 
     await newUser.save();
 
-    // لو الجهاز ده أول مرة، نسجله عشان منديهوش تجربة تانية بعد كده
     if (!deviceAlreadyUsedTrial) {
       await DeviceTrial.create({ deviceId, usedByPhone: phone });
     }
@@ -68,13 +80,13 @@ router.post('/signup', async (req, res) => {
   }
 });
 
-// تسجيل الدخول لمستخدم موجود - لازم يكون من نفس الجهاز اللي سجل بيه
+// تسجيل الدخول - رقم موبايل + باسورد (من غير قفل بالجهاز، عشان الجهاز ممكن يبقى مشترك بين العمال)
 router.post('/login', async (req, res) => {
   try {
-    const { phone, deviceId } = req.body;
+    const { phone, pin } = req.body;
 
-    if (!phone || !deviceId) {
-      return res.status(400).json({ error: 'missing_fields', message: 'لازم تبعت رقم الموبايل ومعرف الجهاز.' });
+    if (!phone || !pin) {
+      return res.status(400).json({ error: 'missing_fields', message: 'لازم تبعت رقم الموبايل والباسورد.' });
     }
 
     const user = await User.findOne({ phone });
@@ -82,14 +94,43 @@ router.post('/login', async (req, res) => {
       return res.status(404).json({ error: 'not_found', message: 'الرقم ده مش مسجل، سجل حساب جديد الأول.' });
     }
 
-    // التأكد إن الدخول من نفس الجهاز اللي اتسجل بيه الحساب
-    if (user.deviceId !== deviceId) {
-      return res.status(403).json({
-        error: 'device_mismatch',
-        message: 'الحساب ده مرتبط بجهاز تاني. لا يمكن استخدامه من هذا الجهاز.'
+    // هل الحساب مقفول مؤقتًا بسبب محاولات غلط كتير؟
+    if (user.lockUntil && new Date() < new Date(user.lockUntil)) {
+      const minutesLeft = Math.ceil((new Date(user.lockUntil) - new Date()) / 60000);
+      return res.status(423).json({
+        error: 'account_locked',
+        message: `الحساب مقفول مؤقتًا بسبب محاولات دخول خاطئة كتير. حاول تاني بعد ${minutesLeft} دقيقة.`
       });
     }
 
+    const pinMatches = user.pinHash === hashPin(pin);
+
+    if (!pinMatches) {
+      user.failedLoginAttempts += 1;
+
+      if (user.failedLoginAttempts >= MAX_FAILED_ATTEMPTS) {
+        const lockUntil = new Date();
+        lockUntil.setMinutes(lockUntil.getMinutes() + LOCK_MINUTES);
+        user.lockUntil = lockUntil;
+        user.failedLoginAttempts = 0;
+        await user.save();
+        return res.status(423).json({
+          error: 'account_locked',
+          message: `تم قفل الحساب مؤقتًا بسبب محاولات دخول خاطئة كتير. حاول تاني بعد ${LOCK_MINUTES} دقيقة.`
+        });
+      }
+
+      await user.save();
+      const remaining = MAX_FAILED_ATTEMPTS - user.failedLoginAttempts;
+      return res.status(401).json({
+        error: 'wrong_pin',
+        message: `الباسورد غلط. متبقي لك ${remaining} محاولات قبل قفل الحساب مؤقتًا.`
+      });
+    }
+
+    // باسورد صح - نصفر عداد المحاولات الغلط
+    user.failedLoginAttempts = 0;
+    user.lockUntil = null;
     user.sessionToken = generateToken();
     await user.save();
 

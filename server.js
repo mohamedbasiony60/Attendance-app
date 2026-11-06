@@ -1,12 +1,15 @@
-app.use(express.static(path.join(__dirname, 'public')));
 const express = require('express');
 const mongoose = require('mongoose');
 const path = require('path');
 
 const authRoutes = require('./routes/auth');
 const attendanceRoutes = require('./routes/attendance');
+const suggestionRoutes = require('./routes/suggestion');
+const adminRoutes = require('./routes/admin');
+
 const requireAuth = require('./middleware/requireAuth');
 const checkSubscription = require('./middleware/checkSubscription');
+const requireAdmin = require('./middleware/requireAdmin');
 
 const app = express();
 app.use(express.json());
@@ -28,16 +31,21 @@ if (MONGO_URI) {
   dbStatus = 'لم يتم ضبط رابط قاعدة البيانات (MONGO_URI) بعد';
 }
 
-// عرض ملفات الواجهة (HTML, CSS, JS) الموجودة في مجلد public
+// عرض ملفات الواجهة (HTML, CSS, JS)
 app.use(express.static(path.join(__dirname, 'public')));
 
-// مسارات التسجيل وتسجيل الدخول (مفتوحة، من غير حماية)
+// التسجيل والدخول (مفتوحة)
 app.use('/api/auth', authRoutes);
 
-// مسارات الحضور - محمية: لازم تسجيل دخول + اشتراك/تجربة شغالة
+// الحضور - محمية: تسجيل دخول + اشتراك/تجربة شغالة
 app.use('/api/attendance', requireAuth, checkSubscription, attendanceRoutes);
 
-// صفحة بسيطة للتأكد إن السيرفر شغال ومتصل بقاعدة البيانات
+// الاقتراحات - محمية بتسجيل دخول بس (متاحة حتى لو التجربة خلصت)
+app.use('/api/suggestion', requireAuth, suggestionRoutes);
+
+// لوحة الأدمن - محمية بباسورد الأدمن الخاص بيك
+app.use('/api/admin', requireAdmin, adminRoutes);
+
 app.get('/status', (req, res) => {
   res.send(`
     <div style="font-family: Arial; text-align:center; padding: 50px; direction: rtl;">
