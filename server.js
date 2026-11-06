@@ -1,5 +1,6 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const path = require('path');
 
 const authRoutes = require('./routes/auth');
 const attendanceRoutes = require('./routes/attendance');
@@ -25,6 +26,9 @@ if (MONGO_URI) {
 } else {
   dbStatus = 'لم يتم ضبط رابط قاعدة البيانات (MONGO_URI) بعد';
 }
+
+// عرض ملفات الواجهة (HTML, CSS, JS) الموجودة في مجلد public
+app.use(express.static(path.join(__dirname, 'public')));
 
 // مسارات التسجيل وتسجيل الدخول (مفتوحة، من غير حماية)
 app.use('/api/auth', authRoutes);
