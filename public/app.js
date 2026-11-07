@@ -1,4 +1,3 @@
-// ===== إدارة معرف الجهاز =====
 function getOrCreateDeviceId() {
   let id = localStorage.getItem('device_id');
   if (!id) {
@@ -50,11 +49,7 @@ async function doLogin() {
   if (!phone) { errEl.textContent = 'اكتب رقم الموبايل.'; return; }
   if (!/^\d{4}$/.test(pin)) { errEl.textContent = 'الباسورد لازم يكون 4 أرقام.'; return; }
 
-  const { status, data } = await apiCall('/api/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ phone, pin })
-  });
-
+  const { status, data } = await apiCall('/api/auth/login', { method: 'POST', body: JSON.stringify({ phone, pin }) });
   if (status !== 200) { errEl.textContent = data.message || 'حصل خطأ، حاول تاني.'; return; }
 
   setToken(data.token);
@@ -65,15 +60,17 @@ async function doLogin() {
 async function doSignup() {
   const phone = document.getElementById('signupPhone').value.trim();
   const pin = document.getElementById('signupPin').value.trim();
+  const confirmPin = document.getElementById('signupPinConfirm').value.trim();
   const errEl = document.getElementById('signupError');
   errEl.textContent = '';
   if (!phone) { errEl.textContent = 'اكتب رقم الموبايل.'; return; }
   if (!/^\d{4}$/.test(pin)) { errEl.textContent = 'الباسورد لازم يكون 4 أرقام.'; return; }
+  if (pin !== confirmPin) { errEl.textContent = 'الباسوردين مش متطابقين.'; return; }
   if (!selectedRole) { errEl.textContent = 'اختار نوع الحساب.'; return; }
 
   const { status, data } = await apiCall('/api/auth/signup', {
     method: 'POST',
-    body: JSON.stringify({ phone, role: selectedRole, deviceId, pin })
+    body: JSON.stringify({ phone, role: selectedRole, deviceId, pin, confirmPin })
   });
 
   if (status !== 201) { errEl.textContent = data.message || 'حصل خطأ، حاول تاني.'; return; }
@@ -92,51 +89,109 @@ function logout() {
 // ===== الشاشة الرئيسية =====
 let currentMult = false;
 let currentNight = false;
+let selectedDay = null;
+let monthData = null; // آخر بيانات شهر محملة
+
+const arabicDayNames = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+const monthNamesAr = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
 
 async function loadMain() {
-  const { status, data } = await apiCall('/api/attendance/today');
+  // أول حاجة نتأكد إن فيه صلاحية استخدام (مش محتاج اشتراك) عن طريق /month
+  const { status, data } = await apiCall('/api/attendance/month');
 
   if (status === 401) { clearToken(); show('authScreen'); return; }
-  if (status === 402) {
-    document.getElementById('paywallMessage').textContent = data.message || 'انتهت فترة التجربة المجانية. من فضلك اشترك للمتابعة.';
-    show('paywallScreen');
-    return;
-  }
+  if (status === 402) { await showPaywall(data.message); return; }
   if (status !== 200) { show('authScreen'); return; }
 
   const role = localStorage.getItem('user_role');
   document.getElementById('userRoleDisplay').textContent = role === 'supervisor' ? 'مشرف 👔' : 'عامل 👷';
 
-  const t = data.today;
-  document.getElementById('todayDateTitle').textContent = `📅 تسجيل حضور اليوم: ${t.day}/${t.month}/${t.year}`;
+  monthData = data;
+  document.getElementById('currentMonthTitle').textContent = `${monthNamesAr[data.month - 1]} ${data.year}`;
 
-  const arabicDayNames = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
-  const dayIndex = new Date(t.year, t.month - 1, t.day).getDay();
-  document.getElementById('todayDayName').textContent = arabicDayNames[dayIndex];
-
-  document.getElementById('todayStatus').value = data.record.status;
-  currentMult = !!data.record.is2x;
-  currentNight = !!data.record.isNight;
-  updateTodayButtons();
+  renderCalendar();
+  selectDay(data.today); // افتراضيًا نفتح فورم النهارده
 
   show('mainScreen');
-
-  // تحميل التقويم الجانبي (للعرض فقط) في كل الأحوال
-  await loadCalendar();
+  await loadSalaryWindow();
 }
 
-function toggleTodayMult() { currentMult = !currentMult; updateTodayButtons(); }
-function toggleTodayNight() { currentNight = !currentNight; updateTodayButtons(); }
-function updateTodayButtons() {
-  document.getElementById('todayMultBtn').classList.toggle('active-mult', currentMult);
-  document.getElementById('todayNightBtn').classList.toggle('active-night', currentNight);
+async function showPaywall(message) {
+  document.getElementById('paywallMessage').textContent = message || 'الفترة المجانية انتهت.';
+  const { data } = await apiCall('/api/config/payment-link');
+  const btn = document.getElementById('paymentLinkBtn');
+  const noLinkMsg = document.getElementById('noPaymentLinkMsg');
+  if (data.link) {
+    btn.href = data.link;
+    btn.style.display = 'block';
+    noLinkMsg.style.display = 'none';
+  } else {
+    btn.style.display = 'none';
+    noLinkMsg.style.display = 'block';
+  }
+  show('paywallScreen');
 }
 
-async function saveToday() {
-  const status = parseFloat(document.getElementById('todayStatus').value);
-  const msgEl = document.getElementById('todaySavedMsg');
+function renderCalendar() {
+  const grid = document.getElementById('calendarDaysGrid');
+  grid.innerHTML = monthData.days.map(d => {
+    let cls = 'day-box';
+    let tag = '-';
 
-  const { status: httpStatus, data } = await apiCall('/api/attendance/today', {
+    if (d.day <= monthData.today) {
+      if (d.status === 1) { cls += ' present'; tag = 'حاضر'; }
+      else if (d.status === 0.5) { cls += ' half'; tag = '½ يوم'; }
+      else { cls += ' absent'; tag = 'غياب'; }
+      if (d.is2x) { cls += ' x2'; tag += ' x2'; }
+      if (d.isNight) tag += ' 🌙';
+      cls += ' editable';
+    } else {
+      cls += ' future';
+      tag = '—';
+    }
+
+    if (d.day === selectedDay) cls += ' today-box';
+
+    const clickAttr = d.day <= monthData.today ? `onclick="selectDay(${d.day})"` : '';
+
+    return `<div class="${cls}" ${clickAttr}>
+      <span class="day-num">${d.day}</span>
+      <span class="day-tag">${tag}</span>
+    </div>`;
+  }).join('');
+}
+
+async function selectDay(day) {
+  selectedDay = day;
+  renderCalendar();
+
+  const { status, data } = await apiCall(`/api/attendance/day/${day}`);
+  if (status !== 200) return;
+
+  const dayIndex = new Date(data.year, data.month - 1, data.day).getDay();
+  document.getElementById('formDateTitle').textContent = `📅 ${data.day}/${data.month}/${data.year}`;
+  document.getElementById('formDayName').textContent = arabicDayNames[dayIndex];
+  document.getElementById('pastDayNotice').style.display = (day < monthData.today) ? 'block' : 'none';
+
+  document.getElementById('dayStatus').value = data.record.status;
+  currentMult = !!data.record.is2x;
+  currentNight = !!data.record.isNight;
+  updateDayButtons();
+  document.getElementById('daySavedMsg').textContent = '';
+}
+
+function toggleDayMult() { currentMult = !currentMult; updateDayButtons(); }
+function toggleDayNight() { currentNight = !currentNight; updateDayButtons(); }
+function updateDayButtons() {
+  document.getElementById('dayMultBtn').classList.toggle('active-mult', currentMult);
+  document.getElementById('dayNightBtn').classList.toggle('active-night', currentNight);
+}
+
+async function saveDay() {
+  const status = parseFloat(document.getElementById('dayStatus').value);
+  const msgEl = document.getElementById('daySavedMsg');
+
+  const { status: httpStatus, data } = await apiCall(`/api/attendance/day/${selectedDay}`, {
     method: 'POST',
     body: JSON.stringify({ status, is2x: currentMult, isNight: currentNight })
   });
@@ -150,63 +205,30 @@ async function saveToday() {
   msgEl.style.color = '#34d399';
   msgEl.textContent = data.message;
 
-  // نحدث التقويم الجانبي فورًا عشان يظهر اليوم اللي اتسجل
-  await loadCalendar();
-}
-
-// ===== التقويم الجانبي - للعرض فقط =====
-const monthNamesAr = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
-
-async function loadCalendar() {
-  const { status, data } = await apiCall('/api/attendance/month');
-  if (status !== 200) return;
-
-  document.getElementById('currentMonthTitle').textContent = `${monthNamesAr[data.month - 1]} ${data.year}`;
-
-  const grid = document.getElementById('calendarDaysGrid');
-  grid.innerHTML = data.days.map(d => {
-    let cls = 'day-box';
-    let tag = '-';
-
-    if (d.day < data.today) {
-      // يوم فات - عرض فقط
-      if (d.status === 1) { cls += ' present'; tag = 'حاضر'; }
-      else if (d.status === 0.5) { cls += ' half'; tag = '½ يوم'; }
-      else { cls += ' absent'; tag = 'غياب'; }
-      if (d.is2x) { cls += ' x2'; tag += ' x2'; }
-      if (d.isNight) tag += ' 🌙';
-    } else if (d.day === data.today) {
-      cls += ' today-box';
-      tag = 'اليوم';
-    } else {
-      cls += ' future';
-      tag = '—';
-    }
-
-    const clickAttr = d.day === data.today ? `onclick="scrollToForm()"` : '';
-
-    return `<div class="${cls}" ${clickAttr}>
-      <span class="day-num">${d.day}</span>
-      <span class="day-tag">${tag}</span>
-    </div>`;
-  }).join('');
-
-  // إظهار قسم حساب المرتب فقط في آخر يوم بالشهر
-  const lastDayView = document.getElementById('lastDayView');
-  if (data.isLastDay) {
-    lastDayView.style.display = 'block';
-    document.getElementById('attemptsRemainingMsg').textContent =
-      `لديك ${data.salaryCalcAttemptsRemaining} من 3 محاولات لحساب المرتب هذا الشهر.`;
-  } else {
-    lastDayView.style.display = 'none';
+  // نحدث بيانات الشهر والتقويم فورًا
+  const monthRes = await apiCall('/api/attendance/month');
+  if (monthRes.status === 200) {
+    monthData = monthRes.data;
+    renderCalendar();
   }
 }
 
-function scrollToForm() {
-  document.querySelector('.main-form-card').scrollIntoView({ behavior: 'smooth' });
+// ===== نافذة حساب المرتب =====
+async function loadSalaryWindow() {
+  const { status, data } = await apiCall('/api/attendance/salary-window');
+  const view = document.getElementById('salaryWindowView');
+
+  if (status !== 200 || !data.active) { view.style.display = 'none'; return; }
+
+  view.style.display = 'block';
+  document.getElementById('sumPresent').textContent = data.summary.presentCount;
+  document.getElementById('sumHalf').textContent = data.summary.halfCount;
+  document.getElementById('sumNight').textContent = data.summary.nightCount;
+  document.getElementById('sumAbsent').textContent = data.summary.absentCount;
+  document.getElementById('attemptsRemainingMsg').textContent =
+    `لديك ${data.attemptsRemaining} من 3 محاولات لحساب المرتب هذا الشهر.`;
 }
 
-// ===== حساب المرتب (آخر يوم بس) =====
 async function calcSalary() {
   const advance = document.getElementById('advanceInput').value;
   const msgEl = document.getElementById('attemptsRemainingMsg');
@@ -225,7 +247,6 @@ async function calcSalary() {
   const r = data.result;
   document.getElementById('resNetSalary').textContent = r.netSalary;
   document.getElementById('resDays').textContent = r.weightedDays;
-  document.getElementById('resNights').textContent = r.nightCount;
   document.getElementById('resGross').textContent = r.grossSalary;
   document.getElementById('resIns').textContent = r.insuranceDeducted;
   document.getElementById('resTax').textContent = r.tax;
@@ -233,35 +254,23 @@ async function calcSalary() {
   document.getElementById('salaryResultBox').style.display = 'block';
 }
 
-// ===== إرسال اقتراح/تعليق =====
+// ===== الاقتراحات =====
 async function sendSuggestion() {
   const textEl = document.getElementById('suggestionText');
   const msgEl = document.getElementById('suggestionMsg');
   const text = textEl.value.trim();
 
-  if (!text) {
-    msgEl.style.color = '#f87171';
-    msgEl.textContent = 'اكتب اقتراحك الأول.';
-    return;
-  }
+  if (!text) { msgEl.style.color = '#f87171'; msgEl.textContent = 'اكتب اقتراحك الأول.'; return; }
 
-  const { status, data } = await apiCall('/api/suggestion', {
-    method: 'POST',
-    body: JSON.stringify({ text })
-  });
+  const { status, data } = await apiCall('/api/suggestion', { method: 'POST', body: JSON.stringify({ text }) });
 
-  if (status !== 200) {
-    msgEl.style.color = '#f87171';
-    msgEl.textContent = data.message || 'حصل خطأ، حاول تاني.';
-    return;
-  }
+  if (status !== 200) { msgEl.style.color = '#f87171'; msgEl.textContent = data.message || 'حصل خطأ، حاول تاني.'; return; }
 
   msgEl.style.color = '#34d399';
   msgEl.textContent = data.message;
   textEl.value = '';
 }
 
-// ===== بداية التشغيل =====
 window.onload = async function () {
   if (getToken()) { await loadMain(); }
   else { show('authScreen'); }

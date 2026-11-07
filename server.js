@@ -6,6 +6,7 @@ const authRoutes = require('./routes/auth');
 const attendanceRoutes = require('./routes/attendance');
 const suggestionRoutes = require('./routes/suggestion');
 const adminRoutes = require('./routes/admin');
+const configRoutes = require('./routes/config');
 
 const requireAuth = require('./middleware/requireAuth');
 const checkSubscription = require('./middleware/checkSubscription');
@@ -36,6 +37,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // التسجيل والدخول (مفتوحة)
 app.use('/api/auth', authRoutes);
+
+// إعدادات عامة (زي رابط الدفع) - مفتوحة من غير تسجيل دخول
+app.use('/api/config', configRoutes);
 
 // الحضور - محمية: تسجيل دخول + اشتراك/تجربة شغالة
 app.use('/api/attendance', requireAuth, checkSubscription, attendanceRoutes);
